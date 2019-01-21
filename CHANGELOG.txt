@@ -1,5 +1,6 @@
 master:
  - obspy.core:
+   * Added almost_equal method for Stream and Trace classes (see #2286).
    * Casting FDSN identifiers to strings upon setting in the stats dictionary
      (see #1997).
    * UTCDateTime objects will now always evaluate equal if their string
@@ -37,7 +38,7 @@ master:
    * Implement reading reftek encodings '16' and '32' (uncompressed data,
      16/32bit integers, see #2058 and #2059)
  - obspy.io.rg16:
-   * implement module to read waveforms and headers from fcnt format (see #2265). 
+   * implement module to read waveforms and headers from fcnt format (see #2265).
  - obspy.io.quakeml:
    * Allow writing invalid ids but raise a warning
      (see #2104, #2090, #2093, #1872).
