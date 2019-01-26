@@ -111,9 +111,19 @@ def _read_sc3ml(path_or_file_object):
     module = None
     module_uri = None
 
+    # Find the inventory root element. (Only finds the first. We expect only one, so any more than that will be ignored.)
+    inv_element = root.find(_ns("Inventory"))
+
+    # Pre-generate a dictionary of the sensors and dataloggers to avoid costly linear search when parsing network nodes.
+    sensors = {}
+    for sensor_element in inv_element.findall(_ns("sensor")):
+        pass
+    dataloggers = {}
+    for datalogger_element in inv_element.findall(_ns("datalogger")):
+        pass
+
     # Collect all networks from the sc3ml inventory
     networks = []
-    inv_element = root.find(_ns("Inventory"))
     for net_element in inv_element.findall(_ns("network")):
         networks.append(_read_network(inv_element, net_element, _ns))
 
@@ -364,12 +374,13 @@ def _read_channel(inventory_root, cha_element, _ns):
     # obtain the sensorID and link to particular publicID <sensor> element
     # in the inventory base node
     sensor_id = cha_element.get("sensor")
-    sensor_element = inventory_root.find(_ns("sensor[@publicID='" + sensor_id +
-                                             "']"))
+    search = "sensor[@publicID='" + sensor_id + "']"
+    sensor_element = inventory_root.find(_ns(search)) ## NOT PERFORMANT !!
+
     # obtain the poles and zeros responseID and link to particular
     # <responsePAZ> publicID element in the inventory base node
     if (sensor_element is not None and
-       sensor_element.get("response") is not None):
+        sensor_element.get("response") is not None):
 
         response_id = sensor_element.get("response")
         response_elements = []
@@ -377,6 +388,7 @@ def _read_channel(inventory_root, cha_element, _ns):
         for resp_type in ['responsePAZ', 'responsePolynomial']:
             search = "{}[@publicID='{}']".format(resp_type, response_id)
             response_elements += inventory_root.findall(_ns(search))
+
         if len(response_elements) == 0:
             msg = ("Could not find response tag with public ID "
                    "'{}'.".format(response_id))
@@ -393,7 +405,7 @@ def _read_channel(inventory_root, cha_element, _ns):
     # element in the inventory base node
     datalogger_id = cha_element.get("datalogger")
     search = "datalogger[@publicID='" + datalogger_id + "']"
-    data_log_element = inventory_root.find(_ns(search))
+    data_log_element = inventory_root.find(_ns(search)) ## NOT PERFORMANT !!
 
     channel.restricted_status = _get_restricted_status(cha_element, _ns)
 
@@ -491,7 +503,7 @@ def _read_instrument_sensitivity(sen_element, cha_element, _ns):
     return sensitivity
 
 
-def _read_response(root, sen_element, resp_element, cha_element,
+def _read_response(inventory_root, sen_element, resp_element, cha_element,
                    data_log_element, _ns, samp_rate, fir, analogue):
     """
     reads response from sc3ml format
@@ -531,7 +543,7 @@ def _read_response(root, sen_element, resp_element, cha_element,
             # get the particular fir stage decimation factor
             # multiply the decimated sample rate by this factor
             search = "responseFIR[@publicID='" + fir_id + "']"
-            fir_element = root.find(_ns(search))
+            fir_element = inventory_root.find(_ns(search))
             if fir_element is None:
                 continue
             dec_fac = _tag2obj(fir_element, _ns("decimationFactor"), int)
@@ -571,7 +583,7 @@ def _read_response(root, sen_element, resp_element, cha_element,
     if len(analogue):
         for analogue_id in analogue:
             search = "responsePAZ[@publicID='" + analogue_id + "']"
-            analogue_element = root.find(_ns(search))
+            analogue_element = inventory_root.find(_ns(search))
             if analogue_element is None:
                 msg = ('Analogue responsePAZ not in inventory:'
                        '%s, stopping before stage %i') % (analogue_id, stage)
@@ -600,7 +612,7 @@ def _read_response(root, sen_element, resp_element, cha_element,
     # Output unit: COUNTS
     for fir_id, rate in zip(fir, fir_stage_rates):
         search = "responseFIR[@publicID='" + fir_id + "']"
-        stage_element = root.find(_ns(search))
+        stage_element = inventory_root.find(_ns(search))
         if stage_element is None:
             msg = ("fir response not in inventory: %s, stopping correction"
                    "before stage %i") % (fir_id, stage)
