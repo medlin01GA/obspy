@@ -22,6 +22,7 @@ import re
 import warnings
 
 from lxml import etree
+from collections import defaultdict
 
 import obspy
 from obspy.core.util.obspy_types import (ComplexWithUncertainties,
@@ -111,24 +112,48 @@ def _read_sc3ml(path_or_file_object):
     module = None
     module_uri = None
 
-    # Find the inventory root element. (Only finds the first. We expect only one, so any more than that will be ignored.)
+    # Find the inventory root element. (Only finds the first. We expect only one, so any more than
+    # that will be ignored.)
     inv_element = root.find(_ns("Inventory"))
 
-    # Pre-generate a dictionary of the sensors and dataloggers to avoid costly linear search when parsing network nodes.
+    # Pre-generate a dictionary of the sensors, dataloggers and responses to avoid costly linear
+    # search when parsing network nodes later.
+    # Register sensors
     sensors = {}
     for sensor_element in inv_element.findall(_ns("sensor")):
         public_id = sensor_element.get("publicID")
         if public_id:
-            sensors[public_id] = sensor_element
+            if public_id in sensors:
+                msg = ("Found multiple matching sensor tags with the same publicID '{}'.".format(public_id))
+                raise obspy.ObsPyException(msg)
+            else:
+                sensors[public_id] = sensor_element
+    # Register dataloggers
     dataloggers = {}
     for datalogger_element in inv_element.findall(_ns("datalogger")):
         public_id = datalogger_element.get("publicID")
         if public_id:
-            dataloggers[public_id] = datalogger_element
+            if public_id in dataloggers:
+                msg = ("Found multiple matching datalogger tags with the same publicID '{}'.".format(public_id))
+                raise obspy.ObsPyException(msg)
+            else:
+                dataloggers[public_id] = datalogger_element
+    # Register reponses
     responses = {
         "responsePAZ": {},
+        "responsePolynomial": {},
         "responseFIR": {}
     }
+    for response_type in responses.keys():
+        for response_element in inv_element.findall(_ns(response_type)):
+            public_id = response_element.get("publicID")
+            if public_id:
+                if public_id in responses[response_type]:
+                    msg = ("Found multiple matching {} tags with the same publicID '{}'.".format(response_type, public_id))
+                    raise obspy.ObsPyException(msg)
+                else:
+                    responses[response_type][public_id] = response_element
+    # Organize all the collection instrument information into a unified intrumentation register.
     instrumentation_register = {
         "sensors": sensors,
         "dataloggers": dataloggers,
@@ -388,8 +413,6 @@ def _read_channel(instrumentation_register, cha_element, _ns):
     # obtain the sensorID and link to particular publicID <sensor> element
     # in the inventory base node
     sensor_id = cha_element.get("sensor")
-    # search = "sensor[@publicID='" + sensor_id + "']"
-    # sensor_element = inventory_root.find(_ns(search)) ## NOT PERFORMANT !!
     sensor_element = instrumentation_register["sensors"].get(sensor_id)
 
     # obtain the poles and zeros responseID and link to particular
@@ -400,9 +423,10 @@ def _read_channel(instrumentation_register, cha_element, _ns):
         response_id = sensor_element.get("response")
         response_elements = []
 
-        for resp_type in ['responsePAZ', 'responsePolynomial']:
-            search = "{}[@publicID='{}']".format(resp_type, response_id)
-            response_elements += inventory_root.findall(_ns(search))  ## TODO: Figure out how to replace this !!
+        for resp_type in instrumentation_register["responses"].keys():
+            found_response = instrumentation_register["responses"][resp_type].get(response_id)
+            if found_response:
+                response_elements += found_response
 
         if len(response_elements) == 0:
             msg = ("Could not find response tag with public ID "
@@ -419,8 +443,6 @@ def _read_channel(instrumentation_register, cha_element, _ns):
     # obtain the dataloggerID and link to particular <responsePAZ> publicID
     # element in the inventory base node
     datalogger_id = cha_element.get("datalogger")
-    # search = "datalogger[@publicID='" + datalogger_id + "']"
-    # data_log_element = inventory_root.find(_ns(search)) ## NOT PERFORMANT !!
     data_log_element = instrumentation_register["dataloggers"].get(datalogger_id)
 
     channel.restricted_status = _get_restricted_status(cha_element, _ns)
@@ -558,8 +580,6 @@ def _read_response(instrumentation_register, sen_element, resp_element, cha_elem
         for fir_id in fir:
             # get the particular fir stage decimation factor
             # multiply the decimated sample rate by this factor
-            # search = "responseFIR[@publicID='" + fir_id + "']"
-            # fir_element = inventory_root.find(_ns(search))  ## NOT PERFORMANT !!
             fir_element = instrumentation_register["responses"]["responseFIR"].get(fir_id)
             if fir_element is None:
                 continue
@@ -599,8 +619,6 @@ def _read_response(instrumentation_register, sen_element, resp_element, cha_elem
     # Output unit: V
     if len(analogue):
         for analogue_id in analogue:
-            # search = "responsePAZ[@publicID='" + analogue_id + "']"
-            # analogue_element = inventory_root.find(_ns(search))
             analogue_element = instrumentation_register["responses"]["responsePAZ"].get(analogue_id)
             if analogue_element is None:
                 msg = ('Analogue responsePAZ not in inventory:'
@@ -629,8 +647,6 @@ def _read_response(instrumentation_register, sen_element, resp_element, cha_elem
     # Input unit: COUNTS
     # Output unit: COUNTS
     for fir_id, rate in zip(fir, fir_stage_rates):
-        # search = "responseFIR[@publicID='" + fir_id + "']"
-        # stage_element = inventory_root.find(_ns(search))
         stage_element = instrumentation_register["responses"]["responseFIR"].get(fir_id)
         if stage_element is None:
             msg = ("fir response not in inventory: %s, stopping correction"
